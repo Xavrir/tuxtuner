@@ -21,7 +21,7 @@ If Armoury Crate worked on Linux, it would look like this.
 
 ## Screenshots
 
-[Screenshot placeholder - add after first run]
+![TuxTuner main window](assets/tuxtuner.png)
 
 ---
 
