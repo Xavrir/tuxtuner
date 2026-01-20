@@ -19,6 +19,12 @@ If Armoury Crate worked on Linux, it would look like this.
 
 ---
 
+## Screenshots
+
+![TuxTuner main window](assets/screenshot.png)
+
+---
+
 ## Installation
 
 ### Arch Linux (AUR)
