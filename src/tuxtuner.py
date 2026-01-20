@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import re
 import subprocess
 import threading
 import gi
@@ -11,6 +12,13 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib, Gio
 
 HELPER_PATH = "/usr/local/libexec/tuxtuner-helper"
+
+# Security: Valid GPU modes (must match tuxtuner-helper allowlist)
+VALID_GPU_MODES = {"Integrated", "Hybrid", "Dedicated", "Compute", "VFIO"}
+
+# Security: Regex patterns for input validation
+MONITOR_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+SESSION_ID_PATTERN = re.compile(r"^[0-9]+$")
 
 
 class TuxTunerApp(Adw.Application):
@@ -353,24 +361,27 @@ class TuxTunerWindow(Adw.PreferencesWindow):
             self.execute_gpu_switch()
 
     def execute_gpu_switch(self):
-        # Get session ID
         try:
-            # Try to get from loginctl if env var missing
-            session_id = os.environ.get("XDG_SESSION_ID")
-            if not session_id:
-                # heuristic
-                res = subprocess.run(
-                    ["loginctl", "session-status"], capture_output=True, text=True
-                )
-                pass
+            if self.pending_gpu_mode not in VALID_GPU_MODES:
+                self.show_toast("Invalid GPU mode selected.")
+                return
+
+            session_id = os.environ.get("XDG_SESSION_ID", "")
+
+            if session_id and not SESSION_ID_PATTERN.match(session_id):
+                self.show_toast("Invalid session ID detected.")
+                return
 
             cmd = ["pkexec", HELPER_PATH, "gpu", self.pending_gpu_mode]
             if session_id:
                 cmd.extend(["--logout", session_id])
 
-            subprocess.Popen(cmd)  # Fire and forget, session will die
-        except Exception:
-            self.show_toast("Failed to switch GPU mode.")
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+                GLib.idle_add(self.show_toast, f"GPU switch failed: {error_msg}")
+        except Exception as e:
+            self.show_toast(f"Failed to switch GPU mode: {e}")
 
     def show_toast(self, message):
         toast = Adw.Toast.new(message)
@@ -394,13 +405,22 @@ class TuxTunerWindow(Adw.PreferencesWindow):
             self.show_toast("No monitor detected")
             return
 
-        # Extract numeric Hz value
-        hz_val = int(hz_str.replace("Hz", ""))
+        if not MONITOR_NAME_PATTERN.match(self.monitor_name):
+            self.show_toast("Invalid monitor name detected")
+            return
+
+        try:
+            hz_val = int(hz_str.replace("Hz", ""))
+        except ValueError:
+            self.show_toast("Invalid refresh rate format")
+            return
+
+        if not (30 <= hz_val <= 500):
+            self.show_toast("Refresh rate out of valid range")
+            return
 
         def run_hz_change():
             try:
-                # Use hyprctl to change refresh rate
-                # Format: hyprctl keyword monitor eDP-2,1920x1200@165,auto,1
                 subprocess.run(
                     [
                         "hyprctl",
