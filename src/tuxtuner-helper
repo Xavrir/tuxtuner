@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# TUXTUNER HELPER
+# Handles privileged operations for CPU/GPU control
+# Usage: tuxtuner-helper <command> [args...]
+
+set -e
+
+COMMAND=$1
+shift
+
+case "$COMMAND" in
+    cpu)
+        # Usage: cpu <target_threads>
+        # Example: cpu 8
+        TARGET=$1
+        if [[ -z "$TARGET" ]]; then
+            echo "Error: Missing target thread count"
+            exit 1
+        fi
+
+        # We assume cpu0 is always online. 
+        # We start controlling from cpu1 up to cpu15 (or max detected).
+        # Adjust logic to iterate through all detected cpu directories that allow online control.
+        
+        for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*; do
+            cpu_num=$(basename "$cpu_dir" | sed 's/cpu//')
+            online_file="$cpu_dir/online"
+            
+            # Skip cpu0 or if online file doesn't exist (some cores might not be toggleable)
+            if [[ "$cpu_num" == "0" ]] || [[ ! -f "$online_file" ]]; then
+                continue
+            fi
+            
+            # Logic: If cpu index is less than target, it should be ONLINE (1).
+            # Note: TARGET 4 means 4 threads total (0, 1, 2, 3).
+            # So if cpu_num (e.g. 3) < TARGET (4), it is ON.
+            # If cpu_num (e.g. 4) >= TARGET (4), it is OFF.
+            
+            if [[ "$cpu_num" -lt "$TARGET" ]]; then
+                echo "1" > "$online_file" || true
+            else
+                echo "0" > "$online_file" || true
+            fi
+        done
+        ;;
+        
+    gpu)
+        # Usage: gpu <mode> [--logout <session_id>]
+        MODE=$1
+        shift
+        
+        if [[ -z "$MODE" ]]; then
+            echo "Error: Missing GPU mode"
+            exit 1
+        fi
+        
+        # Set the mode
+        supergfxctl -m "$MODE"
+        
+        # Check for logout flag
+        if [[ "$1" == "--logout" ]]; then
+            SESSION_ID=$2
+            if [[ -n "$SESSION_ID" ]]; then
+                # Schedule logout asynchronously to allow this script to return successfully
+                systemd-run --unit="power-control-logout" --on-active=2s loginctl terminate-session "$SESSION_ID"
+            fi
+        fi
+        ;;
+        
+    *)
+        echo "Unknown command: $COMMAND"
+        exit 1
+        ;;
+esac
