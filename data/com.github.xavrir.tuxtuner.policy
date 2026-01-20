@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+        "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+    <vendor>TuxTuner</vendor>
+    <vendor_url>https://github.com/Xavrir/tuxtuner</vendor_url>
+    
+    <action id="com.github.xavrir.tuxtuner.helper">
+        <description>Run TuxTuner privileged helper</description>
+        <description xml:lang="en">Run TuxTuner privileged helper for CPU/GPU control</description>
+        <message>Authentication is required to change system power settings</message>
+        <message xml:lang="en">Authentication is required to change CPU thread limits or GPU mode</message>
+        <icon_name>preferences-system</icon_name>
+        <defaults>
+            <!-- Require admin password for all contexts -->
+            <allow_any>auth_admin</allow_any>
+            <allow_inactive>auth_admin</allow_inactive>
+            <!-- Active session: remember auth for 5 minutes -->
+            <allow_active>auth_admin_keep</allow_active>
+        </defaults>
+        <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/tuxtuner-helper</annotate>
+        <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+    </action>
+</policyconfig>
