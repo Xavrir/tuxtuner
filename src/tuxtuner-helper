@@ -3,73 +3,148 @@
 # TUXTUNER HELPER
 # Handles privileged operations for CPU/GPU control
 # Usage: tuxtuner-helper <command> [args...]
+#
+# SECURITY: This script runs as root via pkexec.
+# All inputs MUST be validated before use.
 
-set -e
+set -euo pipefail
+shopt -s nullglob
 
-COMMAND=$1
+# Valid GPU modes (allowlist)
+readonly VALID_GPU_MODES="Integrated Hybrid Dedicated Compute VFIO"
+
+# Maximum sane CPU count
+readonly MAX_CPUS=1024
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+validate_numeric() {
+    local value="$1"
+    local name="${2:-value}"
+    
+    [[ -n "$value" ]] || die "Missing $name"
+    [[ "$value" =~ ^[0-9]+$ ]] || die "Invalid $name: must be numeric"
+}
+
+validate_gpu_mode() {
+    local mode="$1"
+    
+    [[ -n "$mode" ]] || die "Missing GPU mode"
+    
+    # Check against allowlist
+    local valid_mode
+    for valid_mode in $VALID_GPU_MODES; do
+        if [[ "$mode" == "$valid_mode" ]]; then
+            return 0
+        fi
+    done
+    
+    die "Invalid GPU mode: $mode. Valid modes: $VALID_GPU_MODES"
+}
+
+validate_session_id() {
+    local session_id="$1"
+    
+    # Session ID must be numeric only
+    [[ "$session_id" =~ ^[0-9]+$ ]] || die "Invalid session ID: must be numeric"
+}
+
+COMMAND="${1:-}"
+[[ -n "$COMMAND" ]] || die "Missing command"
 shift
 
 case "$COMMAND" in
     cpu)
         # Usage: cpu <target_threads>
         # Example: cpu 8
-        TARGET=$1
-        if [[ -z "$TARGET" ]]; then
-            echo "Error: Missing target thread count"
-            exit 1
+        TARGET="${1:-}"
+        validate_numeric "$TARGET" "target thread count"
+        
+        # Ensure at least 1 CPU stays online
+        if [[ "$TARGET" -lt 1 ]]; then
+            die "Must keep at least 1 CPU online"
+        fi
+        
+        # Cap at maximum sane value
+        if [[ "$TARGET" -gt "$MAX_CPUS" ]]; then
+            die "Target exceeds maximum ($MAX_CPUS)"
         fi
 
-        # We assume cpu0 is always online. 
-        # We start controlling from cpu1 up to cpu15 (or max detected).
-        # Adjust logic to iterate through all detected cpu directories that allow online control.
-        
+        # Count actual CPUs for validation
+        actual_cpus=0
         for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*; do
-            cpu_num=$(basename "$cpu_dir" | sed 's/cpu//')
+            ((actual_cpus++)) || true
+        done
+        
+        if [[ "$actual_cpus" -eq 0 ]]; then
+            die "No CPUs found in sysfs"
+        fi
+        
+        # We assume cpu0 is always online. 
+        # We start controlling from cpu1 up to cpuN.
+        for cpu_dir in /sys/devices/system/cpu/cpu[0-9]*; do
+            cpu_name=$(basename "$cpu_dir")
+            cpu_num="${cpu_name#cpu}"
             online_file="$cpu_dir/online"
             
-            # Skip cpu0 or if online file doesn't exist (some cores might not be toggleable)
+            # Skip cpu0 (always online) or if online file doesn't exist
             if [[ "$cpu_num" == "0" ]] || [[ ! -f "$online_file" ]]; then
                 continue
             fi
             
+            # Validate cpu_num is actually numeric (defense in depth)
+            if ! [[ "$cpu_num" =~ ^[0-9]+$ ]]; then
+                continue
+            fi
+            
             # Logic: If cpu index is less than target, it should be ONLINE (1).
-            # Note: TARGET 4 means 4 threads total (0, 1, 2, 3).
+            # TARGET 4 means 4 threads total (0, 1, 2, 3).
             # So if cpu_num (e.g. 3) < TARGET (4), it is ON.
             # If cpu_num (e.g. 4) >= TARGET (4), it is OFF.
             
             if [[ "$cpu_num" -lt "$TARGET" ]]; then
-                echo "1" > "$online_file" || true
+                echo "1" > "$online_file" 2>/dev/null || true
             else
-                echo "0" > "$online_file" || true
+                echo "0" > "$online_file" 2>/dev/null || true
             fi
         done
+        
+        echo "CPU thread limit set to $TARGET"
         ;;
         
     gpu)
         # Usage: gpu <mode> [--logout <session_id>]
-        MODE=$1
+        MODE="${1:-}"
+        validate_gpu_mode "$MODE"
         shift
         
-        if [[ -z "$MODE" ]]; then
-            echo "Error: Missing GPU mode"
-            exit 1
+        # Set the mode via supergfxctl
+        if ! command -v supergfxctl &>/dev/null; then
+            die "supergfxctl not found"
         fi
         
-        # Set the mode
         supergfxctl -m "$MODE"
         
         # Check for logout flag
-        if [[ "$1" == "--logout" ]]; then
-            SESSION_ID=$2
+        if [[ "${1:-}" == "--logout" ]]; then
+            SESSION_ID="${2:-}"
             if [[ -n "$SESSION_ID" ]]; then
-                # Schedule logout asynchronously to allow this script to return successfully
-                systemd-run --unit="power-control-logout" --on-active=2s loginctl terminate-session "$SESSION_ID"
+                validate_session_id "$SESSION_ID"
+                
+                # Schedule logout asynchronously with unique unit name
+                # Use -- to prevent argument injection
+                systemd-run --unit="tuxtuner-logout-$$-$(date +%s)" --on-active=2s -- \
+                    loginctl terminate-session "$SESSION_ID"
             fi
         fi
+        
+        echo "GPU mode set to $MODE"
         ;;
         
     *)
-        echo "Unknown command: $COMMAND"
-        exit 1
+        die "Unknown command: $COMMAND"
         ;;
 esac
