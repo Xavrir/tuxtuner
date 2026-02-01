@@ -151,7 +151,7 @@ No. TuxTuner does not collect any data, does not phone home, and never will.
 
 ## Roadmap
 
-- [ ] AUR package
+- [✓] AUR package
 - [ ] Flatpak package
 - [ ] wlr-randr support for Sway/other wlroots compositors
 - [ ] GNOME/KDE display API support
