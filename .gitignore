@@ -13,3 +13,5 @@ venv/
 *.swp
 *.swo
 *~
+
+rust/target/

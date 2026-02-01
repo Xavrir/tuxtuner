@@ -9,16 +9,68 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Gtk, Adw, GLib, Gio
+from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 
 HELPER_PATH = "/usr/local/libexec/tuxtuner-helper"
 
-# Security: Valid GPU modes (must match tuxtuner-helper allowlist)
 VALID_GPU_MODES = {"Integrated", "Hybrid", "Dedicated", "Compute", "VFIO"}
-
-# Security: Regex patterns for input validation
 MONITOR_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 SESSION_ID_PATTERN = re.compile(r"^[0-9]+$")
+
+APP_CSS = """
+.tuxtuner-header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    border-radius: 0 0 20px 20px;
+    padding: 28px 20px 24px 20px;
+}
+
+.tuxtuner-title {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: 3px;
+    color: #e94560;
+    text-shadow: 0 2px 12px rgba(233, 69, 96, 0.5);
+}
+
+.tuxtuner-subtitle {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-top: 2px;
+}
+
+.tuxtuner-penguin {
+    font-size: 36px;
+    margin-right: 14px;
+}
+
+.status-value {
+    font-size: 14px;
+    font-weight: 700;
+    color: #e94560;
+}
+
+.status-value-green {
+    font-size: 14px;
+    font-weight: 700;
+    color: #4ade80;
+}
+
+.native-badge {
+    background: linear-gradient(135deg, #e94560 0%, #ff6b9d 100%);
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 6px;
+    margin-left: 6px;
+}
+
+.hz-option-native {
+    font-weight: 700;
+}
+"""
 
 
 class TuxTunerApp(Adw.Application):
@@ -28,6 +80,16 @@ class TuxTunerApp(Adw.Application):
             flags=Gio.ApplicationFlags.FLAGS_NONE,
         )
 
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(APP_CSS.encode())
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(),
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
+
     def do_activate(self):
         win = self.props.active_window
         if not win:
@@ -35,13 +97,12 @@ class TuxTunerApp(Adw.Application):
         win.present()
 
 
-class TuxTunerWindow(Adw.PreferencesWindow):
+class TuxTunerWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.set_default_size(500, 700)
+        self.set_default_size(460, 680)
         self.set_title("TuxTuner")
 
-        # Internal State
         self.current_cpu_threads = 0
         self.max_cpu_threads = 16
         self.current_gpu_mode = "Unknown"
@@ -49,105 +110,153 @@ class TuxTunerWindow(Adw.PreferencesWindow):
         self.gpu_modes = []
         self.available_refresh_rates = []
         self.current_refresh_rate = ""
+        self.native_refresh_rate = ""
         self.monitor_name = ""
+        self._updating_ui = False
 
-        # Toast Overlay
+        self.main_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.toast_overlay = Adw.ToastOverlay()
+        self.toast_overlay.set_child(self.main_content)
         self.set_content(self.toast_overlay)
 
-        # Main Layout Box (Vertical)
-        self.main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.toast_overlay.set_child(self.main_box)
+        self._build_header()
+        self._build_banner()
+        self._build_content()
 
-        # 1. Banner for GPU Logout Warning
+        self.load_data()
+
+    def _build_header(self):
+        header_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, css_classes=["tuxtuner-header"]
+        )
+        header_box.set_halign(Gtk.Align.FILL)
+
+        penguin_label = Gtk.Label(label="🐧", css_classes=["tuxtuner-penguin"])
+        header_box.append(penguin_label)
+
+        title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        title_box.set_valign(Gtk.Align.CENTER)
+
+        title_label = Gtk.Label(label="TUXTUNER", css_classes=["tuxtuner-title"])
+        title_label.set_halign(Gtk.Align.START)
+        title_box.append(title_label)
+
+        subtitle_label = Gtk.Label(
+            label="SYSTEM PERFORMANCE CONTROL", css_classes=["tuxtuner-subtitle"]
+        )
+        subtitle_label.set_halign(Gtk.Align.START)
+        title_box.append(subtitle_label)
+
+        header_box.append(title_box)
+        self.main_content.append(header_box)
+
+    def _build_banner(self):
         self.banner = Adw.Banner(title="Graphics mode change requires logout.")
         self.banner.set_button_label("Switch & Log Out")
         self.banner.connect("button-clicked", self.on_gpu_switch_confirm)
-        self.main_box.append(self.banner)
+        self.main_content.append(self.banner)
 
-        # 2. Preferences Page
-        self.page = Adw.PreferencesPage()
-        self.main_box.append(self.page)
+    def _build_content(self):
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_vexpand(True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.main_content.append(scroll)
 
-        # --- Status Group ---
-        self.status_group = Adw.PreferencesGroup(title="Status")
-        self.page.add(self.status_group)
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        content_box.set_margin_top(8)
+        content_box.set_margin_bottom(24)
+        scroll.set_child(content_box)
 
-        self.status_mode_row = Adw.ActionRow(title="Current Mode")
-        self.status_mode_val = Gtk.Label(label="...", css_classes=["dim-label"])
+        page = Adw.PreferencesPage()
+        content_box.append(page)
+
+        self._build_status_group(page)
+        self._build_cpu_group(page)
+        self._build_gpu_group(page)
+        self._build_display_group(page)
+
+    def _build_status_group(self, page):
+        status_group = Adw.PreferencesGroup(title="System Status")
+        page.add(status_group)
+
+        self.status_mode_row = Adw.ActionRow(
+            title="Graphics Mode", subtitle="Current GPU operation mode"
+        )
+        self.status_mode_val = Gtk.Label(label="...", css_classes=["status-value"])
+        self.status_mode_val.set_valign(Gtk.Align.CENTER)
         self.status_mode_row.add_suffix(self.status_mode_val)
-        self.status_group.add(self.status_mode_row)
+        status_group.add(self.status_mode_row)
 
-        self.status_cpu_row = Adw.ActionRow(title="Active Threads")
-        self.status_cpu_val = Gtk.Label(label="...", css_classes=["dim-label"])
+        self.status_cpu_row = Adw.ActionRow(
+            title="Active Threads", subtitle="Online CPU cores"
+        )
+        self.status_cpu_val = Gtk.Label(label="...", css_classes=["status-value-green"])
+        self.status_cpu_val.set_valign(Gtk.Align.CENTER)
         self.status_cpu_row.add_suffix(self.status_cpu_val)
-        self.status_group.add(self.status_cpu_row)
+        status_group.add(self.status_cpu_row)
 
-        self.status_hz_row = Adw.ActionRow(title="Refresh Rate")
-        self.status_hz_val = Gtk.Label(label="...", css_classes=["dim-label"])
-        self.status_hz_row.add_suffix(self.status_hz_val)
-        self.status_group.add(self.status_hz_row)
+        self.status_hz_row = Adw.ActionRow(title="Refresh Rate", subtitle="Monitor Hz")
+        self.hz_status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self.hz_status_box.set_valign(Gtk.Align.CENTER)
+        self.status_hz_val = Gtk.Label(label="...", css_classes=["status-value"])
+        self.hz_status_box.append(self.status_hz_val)
+        self.native_badge = Gtk.Label(label="NATIVE", css_classes=["native-badge"])
+        self.native_badge.set_visible(False)
+        self.hz_status_box.append(self.native_badge)
+        self.status_hz_row.add_suffix(self.hz_status_box)
+        status_group.add(self.status_hz_row)
 
-        # --- Processor Group ---
-        self.cpu_group = Adw.PreferencesGroup(
+    def _build_cpu_group(self, page):
+        cpu_group = Adw.PreferencesGroup(
             title="Processor", description="Limit active threads for power savings."
         )
-        self.page.add(self.cpu_group)
+        page.add(cpu_group)
 
-        # CPU SpinRow
         self.cpu_spin = Adw.SpinRow.new_with_range(1, 16, 1)
         self.cpu_spin.set_title("CPU Thread Limit")
         self.cpu_spin.set_subtitle("Number of online logical cores")
-        self.cpu_group.add(self.cpu_spin)
+        cpu_group.add(self.cpu_spin)
 
-        # CPU Apply Button
-        self.cpu_apply_btn = Gtk.Button(label="Apply", margin_top=10)
+        self.cpu_apply_btn = Gtk.Button(label="Apply")
+        self.cpu_apply_btn.set_margin_top(12)
         self.cpu_apply_btn.add_css_class("suggested-action")
         self.cpu_apply_btn.connect("clicked", self.on_cpu_apply)
-        self.cpu_group.add(self.cpu_apply_btn)
+        cpu_group.add(self.cpu_apply_btn)
 
-        # --- Graphics Group ---
-        self.gpu_group = Adw.PreferencesGroup(
+    def _build_gpu_group(self, page):
+        gpu_group = Adw.PreferencesGroup(
             title="Graphics", description="Select GPU operation mode."
         )
-        self.page.add(self.gpu_group)
+        page.add(gpu_group)
 
-        # GPU ComboRow
         self.gpu_combo = Adw.ComboRow(title="Graphics Mode")
         self.gpu_combo.set_subtitle("Requires logout to take effect")
         self.gpu_combo.set_model(Gtk.StringList.new(["Loading..."]))
         self.gpu_combo.connect("notify::selected-item", self.on_gpu_changed)
-        self.gpu_group.add(self.gpu_combo)
+        gpu_group.add(self.gpu_combo)
 
-        # --- Display Group ---
-        self.display_group = Adw.PreferencesGroup(
+    def _build_display_group(self, page):
+        display_group = Adw.PreferencesGroup(
             title="Display", description="Control monitor refresh rate."
         )
-        self.page.add(self.display_group)
+        page.add(display_group)
 
-        # Refresh Rate ComboRow
         self.hz_combo = Adw.ComboRow(title="Refresh Rate")
         self.hz_combo.set_subtitle("Higher rates use more power")
         self.hz_combo.set_model(Gtk.StringList.new(["Loading..."]))
         self.hz_combo.connect("notify::selected-item", self.on_hz_changed)
-        self.display_group.add(self.hz_combo)
-
-        # Initial Data Load
-        self.load_data()
+        display_group.add(self.hz_combo)
 
     def load_data(self):
-        # Disable controls while loading
         self.cpu_apply_btn.set_sensitive(False)
         self.gpu_combo.set_sensitive(False)
+        self.hz_combo.set_sensitive(False)
 
-        # Fetch in thread
         thread = threading.Thread(target=self._fetch_system_info)
         thread.daemon = True
         thread.start()
 
     def _fetch_system_info(self):
-        # 1. Get CPU Info
-        # Count total possible cpus
         try:
             total_cpus = 0
             online_cpus = 0
@@ -155,9 +264,7 @@ class TuxTunerWindow(Adw.PreferencesWindow):
                 for name in os.listdir("/sys/devices/system/cpu"):
                     if name.startswith("cpu") and name[3:].isdigit():
                         total_cpus += 1
-                        # Check online
                         online_path = f"/sys/devices/system/cpu/{name}/online"
-                        # cpu0 is usually always online and might not have 'online' file
                         if name == "cpu0":
                             online_cpus += 1
                         elif os.path.exists(online_path):
@@ -166,21 +273,17 @@ class TuxTunerWindow(Adw.PreferencesWindow):
                                     online_cpus += 1
         except Exception as e:
             print(f"Error reading CPU info: {e}")
-            total_cpus = 16  # Fallback
+            total_cpus = 16
             online_cpus = 16
 
-        # 2. Get GPU Info
         gpu_mode = "Integrated"
         supported_modes = []
         try:
-            # Check supported
             res = subprocess.run(["supergfxctl", "-s"], capture_output=True, text=True)
             if res.returncode == 0:
-                # Output format: [Integrated, Hybrid, ...]
                 raw = res.stdout.strip().strip("[]")
                 supported_modes = [m.strip() for m in raw.split(",")]
 
-            # Get current
             res = subprocess.run(["supergfxctl", "-g"], capture_output=True, text=True)
             if res.returncode == 0:
                 gpu_mode = res.stdout.strip()
@@ -188,9 +291,9 @@ class TuxTunerWindow(Adw.PreferencesWindow):
             gpu_mode = "Unavailable"
             supported_modes = []
 
-        # 3. Get Display/Refresh Rate Info (Hyprland)
         refresh_rates = []
         current_hz = ""
+        native_hz = ""
         monitor_name = ""
         try:
             import json
@@ -201,22 +304,31 @@ class TuxTunerWindow(Adw.PreferencesWindow):
             if res.returncode == 0:
                 monitors = json.loads(res.stdout)
                 if monitors:
-                    mon = monitors[0]  # Primary monitor
+                    mon = monitors[0]
                     monitor_name = mon.get("name", "")
                     current_hz = f"{mon.get('refreshRate', 0):.0f}Hz"
-                    # Parse available modes
+
+                    hz_values = []
                     for mode in mon.get("availableModes", []):
-                        # Format: "1920x1200@165.01Hz"
                         if "@" in mode:
                             hz_part = mode.split("@")[1].replace("Hz", "")
                             try:
                                 hz_val = float(hz_part)
-                                hz_str = f"{hz_val:.0f}Hz"
-                                if hz_str not in refresh_rates:
-                                    refresh_rates.append(hz_str)
+                                if hz_val not in hz_values:
+                                    hz_values.append(hz_val)
                             except ValueError:
                                 pass
-                    refresh_rates.sort(key=lambda x: int(x.replace("Hz", "")))
+
+                    hz_values.sort()
+                    if hz_values:
+                        native_hz = f"{int(hz_values[-1])}Hz"
+
+                    for hz_val in hz_values:
+                        hz_str = f"{int(hz_val)}Hz"
+                        if hz_str == native_hz:
+                            hz_str = f"{int(hz_val)}Hz (Native)"
+                        refresh_rates.append(hz_str)
+
         except Exception as e:
             print(f"Error reading display info: {e}")
 
@@ -228,6 +340,7 @@ class TuxTunerWindow(Adw.PreferencesWindow):
             supported_modes,
             refresh_rates,
             current_hz,
+            native_hz,
             monitor_name,
         )
 
@@ -239,35 +352,33 @@ class TuxTunerWindow(Adw.PreferencesWindow):
         supported_modes,
         refresh_rates,
         current_hz,
+        native_hz,
         monitor_name,
     ):
+        self._updating_ui = True
+
         self.max_cpu_threads = total_cpus
         self.current_cpu_threads = online_cpus
         self.current_gpu_mode = gpu_mode
-        self.pending_gpu_mode = gpu_mode  # Initially same
+        self.pending_gpu_mode = gpu_mode
         self.available_refresh_rates = refresh_rates
         self.current_refresh_rate = current_hz
+        self.native_refresh_rate = native_hz
         self.monitor_name = monitor_name
 
-        # Update CPU UI
         self.status_cpu_val.set_label(f"{online_cpus}/{total_cpus}")
 
-        # Configure SpinRow
-        # AdwSpinRow adjustment: value, lower, upper, step, page, size
         adj = self.cpu_spin.get_adjustment()
         adj.set_upper(total_cpus)
         self.cpu_spin.set_value(online_cpus)
         self.cpu_apply_btn.set_sensitive(True)
 
-        # Update GPU UI
         self.status_mode_val.set_label(gpu_mode)
 
         if supported_modes:
             self.gpu_modes = supported_modes
             str_list = Gtk.StringList.new(supported_modes)
             self.gpu_combo.set_model(str_list)
-
-            # Select current mode
             try:
                 idx = supported_modes.index(gpu_mode)
                 self.gpu_combo.set_selected(idx)
@@ -278,23 +389,32 @@ class TuxTunerWindow(Adw.PreferencesWindow):
             self.gpu_combo.set_subtitle("supergfxctl not found")
             self.gpu_combo.set_sensitive(False)
 
-        # Update Display/Refresh Rate UI
         self.status_hz_val.set_label(current_hz if current_hz else "Unknown")
+
+        is_native = (
+            current_hz == native_hz.replace(" (Native)", "") if native_hz else False
+        )
+        self.native_badge.set_visible(is_native)
 
         if refresh_rates:
             str_list = Gtk.StringList.new(refresh_rates)
             self.hz_combo.set_model(str_list)
 
-            # Select current rate
-            try:
-                idx = refresh_rates.index(current_hz)
-                self.hz_combo.set_selected(idx)
-            except ValueError:
-                pass
+            current_idx = -1
+            for i, rate in enumerate(refresh_rates):
+                rate_clean = rate.replace(" (Native)", "")
+                if rate_clean == current_hz:
+                    current_idx = i
+                    break
+
+            if current_idx >= 0:
+                self.hz_combo.set_selected(current_idx)
             self.hz_combo.set_sensitive(True)
         else:
             self.hz_combo.set_subtitle("Could not detect refresh rates")
             self.hz_combo.set_sensitive(False)
+
+        self._updating_ui = False
 
     def on_cpu_apply(self, btn):
         target = int(self.cpu_spin.get_value())
@@ -321,7 +441,7 @@ class TuxTunerWindow(Adw.PreferencesWindow):
             self.show_toast("Failed to apply CPU settings.")
 
     def on_gpu_changed(self, row, param):
-        if not self.gpu_modes:
+        if self._updating_ui or not self.gpu_modes:
             return
 
         selected_idx = self.gpu_combo.get_selected()
@@ -331,7 +451,6 @@ class TuxTunerWindow(Adw.PreferencesWindow):
         new_mode = self.gpu_modes[selected_idx]
         self.pending_gpu_mode = new_mode
 
-        # Show banner if mode is different from current system state
         if new_mode != self.current_gpu_mode:
             self.banner.set_revealed(True)
         else:
@@ -341,7 +460,6 @@ class TuxTunerWindow(Adw.PreferencesWindow):
         if self.pending_gpu_mode == self.current_gpu_mode:
             return
 
-        # Confirm dialog
         dialog = Adw.MessageDialog(
             transient_for=self,
             heading="Change Graphics Mode?",
@@ -352,7 +470,6 @@ class TuxTunerWindow(Adw.PreferencesWindow):
         dialog.set_response_appearance("logout", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_default_response("cancel")
         dialog.set_close_response("cancel")
-
         dialog.connect("response", self.on_gpu_dialog_response)
         dialog.present()
 
@@ -388,14 +505,15 @@ class TuxTunerWindow(Adw.PreferencesWindow):
         self.toast_overlay.add_toast(toast)
 
     def on_hz_changed(self, row, param):
-        if not self.available_refresh_rates:
+        if self._updating_ui or not self.available_refresh_rates:
             return
 
         selected_idx = self.hz_combo.get_selected()
         if selected_idx < 0 or selected_idx >= len(self.available_refresh_rates):
             return
 
-        new_hz = self.available_refresh_rates[selected_idx]
+        selected_rate = self.available_refresh_rates[selected_idx]
+        new_hz = selected_rate.replace(" (Native)", "")
 
         if new_hz != self.current_refresh_rate:
             self.apply_refresh_rate(new_hz)
@@ -419,6 +537,8 @@ class TuxTunerWindow(Adw.PreferencesWindow):
             self.show_toast("Refresh rate out of valid range")
             return
 
+        self.hz_combo.set_sensitive(False)
+
         def run_hz_change():
             try:
                 subprocess.run(
@@ -439,12 +559,19 @@ class TuxTunerWindow(Adw.PreferencesWindow):
         threading.Thread(target=run_hz_change).start()
 
     def _on_hz_applied(self, success, hz_str):
+        self.hz_combo.set_sensitive(True)
         if success:
             self.current_refresh_rate = hz_str
             self.status_hz_val.set_label(hz_str)
+
+            native_clean = self.native_refresh_rate.replace(" (Native)", "")
+            is_native = hz_str == native_clean
+            self.native_badge.set_visible(is_native)
+
             self.show_toast(f"Refresh rate set to {hz_str}")
         else:
             self.show_toast("Failed to change refresh rate")
+            self.load_data()
 
 
 if __name__ == "__main__":
