@@ -112,6 +112,10 @@ case "$COMMAND" in
             fi
         done
         
+        # Signal TuxTuner manual override so power-switch-gpu respects it
+        mkdir -p /run/tuxtuner
+        echo "$TARGET" > /run/tuxtuner/cpu-override
+        
         echo "CPU thread limit set to $TARGET"
         ;;
         
@@ -140,6 +144,10 @@ case "$COMMAND" in
                     loginctl terminate-session "$SESSION_ID"
             fi
         fi
+        
+        # Signal TuxTuner manual override so power-switch-gpu respects it
+        mkdir -p /run/tuxtuner
+        echo "$MODE" > /run/tuxtuner/gpu-override
         
         echo "GPU mode set to $MODE"
         ;;
