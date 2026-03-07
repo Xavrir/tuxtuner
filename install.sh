@@ -11,7 +11,7 @@ if [[ "$PREFIX" =~ [^a-zA-Z0-9/_-] ]]; then
 fi
 
 BINDIR="$PREFIX/bin"
-LIBEXECDIR="$PREFIX/libexec"
+LIBEXECDIR="$PREFIX/lib/tuxtuner"
 POLKIT_DIR="/usr/share/polkit-1/actions"
 
 echo "TuxTuner Installer"
@@ -60,7 +60,7 @@ POLICY_FILE="$POLKIT_DIR/com.github.xavrir.tuxtuner.policy"
 if [[ -f "data/com.github.xavrir.tuxtuner.policy" ]]; then
     sudo cp "data/com.github.xavrir.tuxtuner.policy" "$POLICY_FILE"
     
-    sudo sed -i "s|/usr/local/libexec/tuxtuner-helper|$LIBEXECDIR/tuxtuner-helper|g" "$POLICY_FILE"
+    sudo sed -i "s|/usr/local/lib/tuxtuner/tuxtuner-helper|$LIBEXECDIR/tuxtuner-helper|g" "$POLICY_FILE"
     
     echo "Polkit policy installed."
 else

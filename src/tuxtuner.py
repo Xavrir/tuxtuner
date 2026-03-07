@@ -11,7 +11,7 @@ gi.require_version("Adw", "1")
 
 from gi.repository import Gtk, Adw, GLib, Gio, Gdk
 
-HELPER_PATH = "/usr/local/libexec/tuxtuner-helper"
+HELPER_PATH = "/usr/local/lib/tuxtuner/tuxtuner-helper"
 
 VALID_GPU_MODES = {"Integrated", "Hybrid", "Dedicated", "Compute", "VFIO"}
 MONITOR_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
