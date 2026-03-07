@@ -98,6 +98,11 @@ struct WindowState {
     current_refresh_rate: String,
     native_refresh_rate: String,
     monitor_name: String,
+    monitor_width: u32,
+    monitor_height: u32,
+    monitor_x: i32,
+    monitor_y: i32,
+    monitor_scale: f64,
 }
 
 impl TuxTunerWindow {
@@ -496,6 +501,11 @@ impl TuxTunerWindow {
                 let current = state_ref.current_refresh_rate.clone();
                 let monitor = state_ref.monitor_name.clone();
                 let native = state_ref.native_refresh_rate.clone();
+                let mon_width = state_ref.monitor_width;
+                let mon_height = state_ref.monitor_height;
+                let mon_x = state_ref.monitor_x;
+                let mon_y = state_ref.monitor_y;
+                let mon_scale = state_ref.monitor_scale;
                 drop(state_ref);
 
                 if new_hz == current {
@@ -521,7 +531,10 @@ impl TuxTunerWindow {
                 glib::spawn_future_local(async move {
                     let monitor_clone = monitor.clone();
                     let result = gio::spawn_blocking(move || {
-                        system_info::apply_refresh_rate(&monitor_clone, hz_val)
+                        system_info::apply_refresh_rate(
+                            &monitor_clone, hz_val,
+                            mon_width, mon_height, mon_x, mon_y, mon_scale,
+                        )
                     }).await;
 
                     combo_clone.set_sensitive(true);
@@ -570,6 +583,11 @@ impl TuxTunerWindow {
                 state_ref.current_refresh_rate = info.current_hz.clone();
                 state_ref.native_refresh_rate = info.native_hz.clone();
                 state_ref.monitor_name = info.monitor_name;
+                state_ref.monitor_width = info.monitor_width;
+                state_ref.monitor_height = info.monitor_height;
+                state_ref.monitor_x = info.monitor_x;
+                state_ref.monitor_y = info.monitor_y;
+                state_ref.monitor_scale = info.monitor_scale;
             }
 
             status_cpu_val.set_label(&format!("{}/{}", info.online_cpus, info.total_cpus));

@@ -112,6 +112,11 @@ class TuxTunerWindow(Adw.ApplicationWindow):
         self.current_refresh_rate = ""
         self.native_refresh_rate = ""
         self.monitor_name = ""
+        self.monitor_width = 0
+        self.monitor_height = 0
+        self.monitor_x = 0
+        self.monitor_y = 0
+        self.monitor_scale = 1.0
         self._updating_ui = False
 
         self.main_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -295,6 +300,11 @@ class TuxTunerWindow(Adw.ApplicationWindow):
         current_hz = ""
         native_hz = ""
         monitor_name = ""
+        monitor_width = 0
+        monitor_height = 0
+        monitor_x = 0
+        monitor_y = 0
+        monitor_scale = 1.0
         try:
             import json
 
@@ -307,6 +317,11 @@ class TuxTunerWindow(Adw.ApplicationWindow):
                     mon = monitors[0]
                     monitor_name = mon.get("name", "")
                     current_hz = f"{mon.get('refreshRate', 0):.0f}Hz"
+                    monitor_width = mon.get("width", 0)
+                    monitor_height = mon.get("height", 0)
+                    monitor_x = mon.get("x", 0)
+                    monitor_y = mon.get("y", 0)
+                    monitor_scale = mon.get("scale", 1.0)
 
                     hz_values = []
                     for mode in mon.get("availableModes", []):
@@ -342,6 +357,11 @@ class TuxTunerWindow(Adw.ApplicationWindow):
             current_hz,
             native_hz,
             monitor_name,
+            monitor_width,
+            monitor_height,
+            monitor_x,
+            monitor_y,
+            monitor_scale,
         )
 
     def _update_ui_state(
@@ -354,6 +374,11 @@ class TuxTunerWindow(Adw.ApplicationWindow):
         current_hz,
         native_hz,
         monitor_name,
+        monitor_width,
+        monitor_height,
+        monitor_x,
+        monitor_y,
+        monitor_scale,
     ):
         self._updating_ui = True
 
@@ -365,6 +390,11 @@ class TuxTunerWindow(Adw.ApplicationWindow):
         self.current_refresh_rate = current_hz
         self.native_refresh_rate = native_hz
         self.monitor_name = monitor_name
+        self.monitor_width = monitor_width
+        self.monitor_height = monitor_height
+        self.monitor_x = monitor_x
+        self.monitor_y = monitor_y
+        self.monitor_scale = monitor_scale
 
         self.status_cpu_val.set_label(f"{online_cpus}/{total_cpus}")
 
@@ -537,17 +567,27 @@ class TuxTunerWindow(Adw.ApplicationWindow):
             self.show_toast("Refresh rate out of valid range")
             return
 
+        if self.monitor_width <= 0 or self.monitor_height <= 0:
+            self.show_toast("Unknown monitor resolution")
+            return
+
         self.hz_combo.set_sensitive(False)
+
+        # Build monitor arg with explicit resolution and position to preserve
+        # the current layout. Using "preferred" or "auto" can cause Hyprland
+        # to reposition monitors, which destroys layer surfaces (e.g. Waybar).
+        scale = self.monitor_scale if self.monitor_scale > 0 else 1.0
+        monitor_arg = (
+            f"{self.monitor_name},"
+            f"{self.monitor_width}x{self.monitor_height}@{hz_val},"
+            f"{self.monitor_x}x{self.monitor_y},"
+            f"{scale}"
+        )
 
         def run_hz_change():
             try:
                 subprocess.run(
-                    [
-                        "hyprctl",
-                        "keyword",
-                        "monitor",
-                        f"{self.monitor_name},preferred@{hz_val},auto,1",
-                    ],
+                    ["hyprctl", "keyword", "monitor", monitor_arg],
                     check=True,
                     capture_output=True,
                 )
