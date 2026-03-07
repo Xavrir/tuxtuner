@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::process::Command;
 
-pub const HELPER_PATH: &str = "/usr/libexec/tuxtuner-helper";
+pub const HELPER_PATH: &str = "/usr/lib/tuxtuner/tuxtuner-helper";
 
 pub static VALID_GPU_MODES: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     ["Integrated", "Hybrid", "Dedicated", "Compute", "VFIO"]

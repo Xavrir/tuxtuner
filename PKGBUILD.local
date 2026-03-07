@@ -11,9 +11,9 @@ depends=(
     'gtk4'
     'libadwaita'
     'polkit'
-    'hyprland'
 )
 optdepends=(
+    'hyprland: For display refresh rate control'
     'supergfxctl: For GPU mode switching on ASUS laptops'
 )
 makedepends=(
@@ -36,14 +36,14 @@ package() {
     install -Dm755 "rust/target/release/tuxtuner" "$pkgdir/usr/bin/tuxtuner"
 
     # Install helper script
-    install -Dm755 "src/tuxtuner-helper" "$pkgdir/usr/libexec/tuxtuner-helper"
+    install -Dm755 "src/tuxtuner-helper" "$pkgdir/usr/lib/tuxtuner/tuxtuner-helper"
 
     # Install polkit policy
     install -Dm644 "data/com.github.xavrir.tuxtuner.policy" \
         "$pkgdir/usr/share/polkit-1/actions/com.github.xavrir.tuxtuner.policy"
 
     # Update polkit policy path
-    sed -i 's|/usr/local/libexec/tuxtuner-helper|/usr/libexec/tuxtuner-helper|g' \
+    sed -i 's|/usr/local/lib/tuxtuner/tuxtuner-helper|/usr/lib/tuxtuner/tuxtuner-helper|g' \
         "$pkgdir/usr/share/polkit-1/actions/com.github.xavrir.tuxtuner.policy"
 
     # Install desktop file
