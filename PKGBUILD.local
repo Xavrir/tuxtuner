@@ -1,7 +1,7 @@
 # Maintainer: Xavrir <xavrir@github.com>
 # Local development PKGBUILD - builds from current directory
 pkgname=tuxtuner-git
-pkgver=2.0.0
+pkgver=2.2.0
 pkgrel=1
 pkgdesc="System performance control for Linux - CPU threads, GPU modes, and display refresh rates (Git version)"
 arch=('x86_64')
