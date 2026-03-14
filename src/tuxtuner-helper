@@ -12,6 +12,7 @@ shopt -s nullglob
 
 # Valid GPU modes (allowlist)
 readonly VALID_GPU_MODES="Integrated Hybrid Dedicated Compute VFIO"
+readonly PRE_LOGOUT_HOOK="/etc/tuxtuner/hooks/pre-logout"
 
 # Maximum sane CPU count
 readonly MAX_CPUS=1024
@@ -50,6 +51,22 @@ validate_session_id() {
     
     # Session ID must be numeric only
     [[ "$session_id" =~ ^[0-9]+$ ]] || die "Invalid session ID: must be numeric"
+}
+
+run_pre_logout_hook() {
+    local mode="$1"
+    local session_id="$2"
+
+    if [[ ! -e "$PRE_LOGOUT_HOOK" ]]; then
+        return
+    fi
+
+    [[ -f "$PRE_LOGOUT_HOOK" ]] || die "Pre-logout hook path must be a regular file: $PRE_LOGOUT_HOOK"
+    [[ -x "$PRE_LOGOUT_HOOK" ]] || die "Pre-logout hook is not executable: $PRE_LOGOUT_HOOK"
+
+    TUXTUNER_GPU_MODE="$mode" \
+    TUXTUNER_SESSION_ID="$session_id" \
+    "$PRE_LOGOUT_HOOK" || die "Pre-logout hook failed: $PRE_LOGOUT_HOOK"
 }
 
 COMMAND="${1:-}"
@@ -137,6 +154,7 @@ case "$COMMAND" in
             SESSION_ID="${2:-}"
             if [[ -n "$SESSION_ID" ]]; then
                 validate_session_id "$SESSION_ID"
+                run_pre_logout_hook "$MODE" "$SESSION_ID"
                 
                 # Schedule logout asynchronously with unique unit name
                 # Use -- to prevent argument injection

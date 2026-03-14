@@ -78,6 +78,27 @@ Or launch from your application menu.
 
 Note: GPU mode changes require a session restart. This is a hardware limitation, not a software one.
 
+### Optional Auto-Login Integration
+
+TuxTuner now supports an opt-in pre-logout hook for users who want to restore their session through a login-manager-specific script.
+
+- If `/etc/tuxtuner/hooks/pre-logout` exists and is executable, TuxTuner runs it as root after the GPU mode is changed and before the session logout is scheduled.
+- The hook receives `TUXTUNER_GPU_MODE` and `TUXTUNER_SESSION_ID` in its environment.
+- If the hook exits non-zero, TuxTuner aborts the logout so the user is not left at the login screen unexpectedly.
+
+This keeps the project portable: TuxTuner does not hard-code SDDM, GDM, greetd, or any one desktop manager, but distro packagers and advanced users can integrate their own auto-login flow.
+
+Example hook:
+
+```bash
+#!/bin/sh
+set -eu
+
+# Prepare your login-manager-specific auto-login flow here.
+# Example: write a one-shot marker, toggle a DM setting, or call a helper.
+printf '%s\n' "$TUXTUNER_GPU_MODE" > /run/tuxtuner/next-gpu-mode
+```
+
 ### CPU Thread Limiting
 
 1. Adjust the slider or spin control to your desired thread count

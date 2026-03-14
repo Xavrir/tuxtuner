@@ -12,6 +12,7 @@ fi
 
 BINDIR="$PREFIX/bin"
 LIBEXECDIR="$PREFIX/lib/tuxtuner"
+HOOKSDIR="/etc/tuxtuner/hooks"
 POLKIT_DIR="/usr/share/polkit-1/actions"
 
 echo "TuxTuner Installer"
@@ -41,7 +42,7 @@ echo ""
 
 echo "Installing to $PREFIX..."
 
-sudo mkdir -p "$BINDIR" "$LIBEXECDIR"
+sudo mkdir -p "$BINDIR" "$LIBEXECDIR" "$HOOKSDIR"
 
 sudo cp src/tuxtuner.py "$BINDIR/tuxtuner"
 sudo chmod +x "$BINDIR/tuxtuner"
@@ -73,3 +74,4 @@ echo ""
 echo "Run with: tuxtuner"
 echo ""
 echo "Optional: For supergfxctl GPU switching, install asusctl/supergfxctl"
+echo "Optional: Add an executable pre-logout hook at $HOOKSDIR/pre-logout for login-manager integration"
