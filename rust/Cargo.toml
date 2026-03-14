@@ -1,6 +1,6 @@
 [package]
 name = "tuxtuner"
-version = "2.0.0"
+version = "2.2.1"
 edition = "2021"
 authors = ["Xavrir <xavrir@github.com>"]
 description = "System performance control for Linux - CPU threads, GPU modes, and display refresh rates"
